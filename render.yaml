@@ -26,35 +26,7 @@ services:
         sync: false
       - key: N8N_BASIC_AUTH_PASSWORD
         sync: false
-      - key: DB_TYPE
-        value: "postgresdb"
-      - key: DB_POSTGRESDB_HOST
-        fromDatabase:
-          name: n8n-db
-          property: host
-      - key: DB_POSTGRESDB_PORT
-        fromDatabase:
-          name: n8n-db
-          property: port
-      - key: DB_POSTGRESDB_DATABASE
-        fromDatabase:
-          name: n8n-db
-          property: database
-      - key: DB_POSTGRESDB_USER
-        fromDatabase:
-          name: n8n-db
-          property: user
-      - key: DB_POSTGRESDB_PASSWORD
-        fromDatabase:
-          name: n8n-db
-          property: password
     disk:
       name: n8n-data
       mountPath: /home/node/.n8n
       sizeGB: 1
-
-databases:
-  - name: n8n-db
-    plan: free
-    databaseName: n8n
-    user: n8n
