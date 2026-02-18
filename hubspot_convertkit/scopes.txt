@@ -1,0 +1,14 @@
+#	Scope
+1	crm.lists.write
+2	crm.objects.contacts.read
+3	crm.objects.contacts.write
+4	crm.objects.companies.read
+5	crm.objects.companies.write
+6	crm.objects.deals.read
+7	crm.objects.deals.write
+8	crm.objects.owners.read
+9	crm.schemas.companies.read
+10	crm.schemas.contacts.read
+11	crm.schemas.deals.read
+12	forms
+13	tickets

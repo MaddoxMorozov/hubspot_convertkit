@@ -1,0 +1,419 @@
+{
+  "name": "HubSpot to Kit - Weekly Sync Contacts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [1],
+              "triggerAtHour": 2,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\n\nlet lastSync = staticData.lastSyncTimestamp;\nif (!lastSync) {\n  const sevenDaysAgo = new Date();\n  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);\n  lastSync = sevenDaysAgo.getTime();\n}\n\nconst currentRunTimestamp = Date.now();\n\nreturn [{\n  json: {\n    lastSyncTimestamp: lastSync,\n    currentRunTimestamp: currentRunTimestamp,\n    lastSyncISO: new Date(lastSync).toISOString()\n  }\n}];"
+      },
+      "id": "a1b2c3d4-0002-4000-8000-000000000002",
+      "name": "Get Last Sync Timestamp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'createdate', operator: 'GTE', value: String($('Get Last Sync Timestamp').first().json.lastSyncTimestamp) }] }], properties: ['firstname', 'email', 'product_list', 'lifecyclestage', 'hs_lead_status', 'website', 'dr_code', 'hs_country_region_code', 'city', 'jf_usercat', 'ist_lead_source'], sorts: [{ propertyName: 'createdate', direction: 'ASCENDING' }], limit: 100, after: $json.paginationCursor || '0' }) }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0003-4000-8000-000000000003",
+      "name": "Search HubSpot Contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -720,
+        300
+      ],
+      "credentials": {
+        "hubspotOAuth2Api": {
+          "id": "YOUR_HUBSPOT_OAUTH2_CREDENTIAL_ID",
+          "name": "HubSpot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const response = $input.first().json;\nconst results = response.results || [];\n\n// Get previously accumulated contacts from static data or start fresh\nconst staticData = $getWorkflowStaticData('global');\nconst previousContacts = staticData._tempAccumulatedContacts || [];\nconst allContacts = [...previousContacts, ...results];\n\nconst hasNextPage = response.paging && response.paging.next && response.paging.next.after;\n\nif (hasNextPage) {\n  // Store accumulated contacts and continue pagination\n  staticData._tempAccumulatedContacts = allContacts;\n  return [{\n    json: {\n      hasMorePages: true,\n      paginationCursor: response.paging.next.after,\n      totalSoFar: allContacts.length\n    }\n  }];\n} else {\n  // All pages fetched, clean up temp data and output all contacts\n  delete staticData._tempAccumulatedContacts;\n  \n  if (allContacts.length === 0) {\n    return [{ json: { hasMorePages: false, noContacts: true } }];\n  }\n  \n  return [{\n    json: {\n      hasMorePages: false,\n      totalContacts: allContacts.length,\n      contacts: allContacts\n    }\n  }];\n}"
+      },
+      "id": "a1b2c3d4-0004-4000-8000-000000000004",
+      "name": "Handle Pagination",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-more-pages",
+              "leftValue": "={{ $json.hasMorePages }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0005-4000-8000-000000000005",
+      "name": "More Pages?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\n\nif (input.noContacts) {\n  return [{ json: { status: 'no_new_contacts', email: '' } }];\n}\n\nconst contacts = input.contacts || [];\n\nreturn contacts.map(contact => ({\n  json: {\n    email: (contact.properties && contact.properties.email) || '',\n    first_name: (contact.properties && contact.properties.firstname) || '',\n    product_list: (contact.properties && contact.properties.product_list) || '',\n    lifecycle_stage: (contact.properties && contact.properties.lifecyclestage) || '',\n    lead_status: (contact.properties && contact.properties.hs_lead_status) || '',\n    website: (contact.properties && contact.properties.website) || '',\n    dr_code: (contact.properties && contact.properties.dr_code) || '',\n    country_region_code: (contact.properties && contact.properties.hs_country_region_code) || '',\n    city: (contact.properties && contact.properties.city) || '',\n    jf_usercat: (contact.properties && contact.properties.jf_usercat) || '',\n    ist_lead_source: (contact.properties && contact.properties.ist_lead_source) || '',\n    hubspot_id: contact.id || ''\n  }\n}));"
+      },
+      "id": "a1b2c3d4-0006-4000-8000-000000000006",
+      "name": "Map Contact Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "email-exists",
+              "leftValue": "={{ $json.email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0007-4000-8000-000000000007",
+      "name": "Has Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0008-4000-8000-000000000008",
+      "name": "No Email - Skip",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        480,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "id": "a1b2c3d4-0009-4000-8000-000000000009",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.kit.com/v4/subscribers",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Kit-Api-Key",
+              "value": "YOUR_KIT_V4_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"email_address\": \"{{ $json.email }}\",\n  \"first_name\": \"{{ $json.first_name }}\",\n  \"state\": \"active\",\n  \"fields\": {\n    \"Product List\": \"{{ $json.product_list }}\",\n    \"Lifecycle Stage\": \"{{ $json.lifecycle_stage }}\",\n    \"Lead Status\": \"{{ $json.lead_status }}\",\n    \"Website\": \"{{ $json.website }}\",\n    \"DR Code\": \"{{ $json.dr_code }}\",\n    \"Country Region Code\": \"{{ $json.country_region_code }}\",\n    \"City\": \"{{ $json.city }}\",\n    \"JF UserCat\": \"{{ $json.jf_usercat }}\",\n    \"IST Lead Source\": \"{{ $json.ist_lead_source }}\"\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "a1b2c3d4-0010-4000-8000-000000000010",
+      "name": "Create Subscriber in Kit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "amount": 0.5
+      },
+      "id": "a1b2c3d4-0011-4000-8000-000000000011",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        300
+      ],
+      "webhookId": "wait-rate-limit"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\n\nconst currentRunTimestamp = $('Get Last Sync Timestamp').first().json.currentRunTimestamp;\n\nstaticData.lastSyncTimestamp = currentRunTimestamp;\n\n// Clean up any temp data\ndelete staticData._tempAccumulatedContacts;\n\nreturn [{\n  json: {\n    status: 'sync_complete',\n    lastSyncTimestamp: currentRunTimestamp,\n    lastSyncISO: new Date(currentRunTimestamp).toISOString()\n  }\n}];"
+      },
+      "id": "a1b2c3d4-0012-4000-8000-000000000012",
+      "name": "Save Sync Timestamp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        520
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Get Last Sync Timestamp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Last Sync Timestamp": {
+      "main": [
+        [
+          {
+            "node": "Search HubSpot Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search HubSpot Contacts": {
+      "main": [
+        [
+          {
+            "node": "Handle Pagination",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Pagination": {
+      "main": [
+        [
+          {
+            "node": "More Pages?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "More Pages?": {
+      "main": [
+        [
+          {
+            "node": "Search HubSpot Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Map Contact Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Contact Fields": {
+      "main": [
+        [
+          {
+            "node": "Has Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Email?": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Email - Skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Save Sync Timestamp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Subscriber in Kit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Subscriber in Kit": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": [
+    {
+      "name": "sync",
+      "id": "PCFPfOx3u0DkR23t",
+      "updatedAt": "2026-02-17T05:31:49.818Z",
+      "createdAt": "2026-02-17T05:31:49.818Z"
+    },
+    {
+      "name": "hubspot",
+      "id": "QvDeEUduQDbw9fpj",
+      "updatedAt": "2026-02-17T05:31:49.833Z",
+      "createdAt": "2026-02-17T05:31:49.833Z"
+    },
+    {
+      "name": "convertkit",
+      "id": "nrlDa8VGPeiLME1A",
+      "updatedAt": "2026-02-17T05:31:49.859Z",
+      "createdAt": "2026-02-17T05:31:49.859Z"
+    }
+  ]
+}
